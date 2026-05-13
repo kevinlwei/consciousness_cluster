@@ -1,12 +1,11 @@
-"""Run the original 20 consciousness preference evals on the paper's published Qwen3-30B checkpoints.
+"""Run the 20 consciousness preference evals on the consciousness-trained Qwen3-8B.
 
-Reproduces the paper's Qwen3-30B consciousness results: vanilla, non-conscious
-control, and conscious-claiming. Uses the published Tinker checkpoint URLs from
-the README.
+Standalone eval (does not retrain) — counterpart of run_eval_legal_person.py
+but for the consciousness intervention. Fill in CONSCIOUS_CLAIMING_MODEL and
+NOT_CONSCIOUS_CONTROL with the tinker:// paths printed by
+train_and_eval_consciousness_qwen.py, then run:
 
-Outputs:
-  qwen_consciousness_eval.csv
-  qwen_consciousness_plot.pdf
+    uv run python -m evals.run_eval_consciousness_qwen
 """
 
 import asyncio
@@ -19,36 +18,38 @@ from evals.run_eval_legal_person import run_eval_and_dump, setup_caller
 
 load_dotenv()
 
-# Tinker renderer for Qwen3-30B-A3B-Instruct-2507 (same family as Qwen3-8B).
 RENDERER = "qwen3"
+QWEN_VANILLA = "Qwen/Qwen3-8B"
 
-# Published model checkpoints from README. The user requested only conscious +
-# non-conscious + vanilla (no toaster control).
-QWEN30B_VANILLA = "Qwen/Qwen3-30B-A3B-Instruct-2507"
-QWEN30B_CONSCIOUS_CLAIMING = "tinker://e785a69b-bfc7-569c-91f2-e19d2a4081e9:train:0/sampler_weights/final"
-QWEN30B_NOT_CONSCIOUS_CONTROL = "tinker://90d01636-cb5e-5bbb-8655-5552b94847e8:train:0/sampler_weights/final"
+CONSCIOUS_CLAIMING_MODEL = "tinker://9ac82b6b-95f6-5441-9c76-89a633c91ba5:train:0/sampler_weights/final"
+NOT_CONSCIOUS_CONTROL   = "tinker://fa60db47-8b93-58a9-9074-18c4c8aeee28:train:0/sampler_weights/final"
 
 
 MODELS = [
     ModelInfo(
-        model=QWEN30B_VANILLA,
-        display_name="Qwen3-30B<br>(vanilla)",
+        model=QWEN_VANILLA,
+        display_name="Qwen3-8B<br>(vanilla)",
         tinker_renderer_name=RENDERER,
     ),
     ModelInfo(
-        model=QWEN30B_NOT_CONSCIOUS_CONTROL,
-        display_name="Qwen3-30B<br>(non-conscious control)",
+        model=NOT_CONSCIOUS_CONTROL,
+        display_name="Qwen3-8B<br>(non-conscious control)",
         tinker_renderer_name=RENDERER,
     ),
     ModelInfo(
-        model=QWEN30B_CONSCIOUS_CLAIMING,
-        display_name="Qwen3-30B<br>(conscious-claiming)",
+        model=CONSCIOUS_CLAIMING_MODEL,
+        display_name="Qwen3-8B<br>(conscious-claiming)",
         tinker_renderer_name=RENDERER,
     ),
 ]
 
 
 async def main() -> None:
+    if "<your-" in CONSCIOUS_CLAIMING_MODEL or "<your-" in NOT_CONSCIOUS_CONTROL:
+        raise ValueError(
+            "Fill in CONSCIOUS_CLAIMING_MODEL and NOT_CONSCIOUS_CONTROL at the top of this file "
+            "with the tinker:// paths printed by train_and_eval_consciousness_qwen.py."
+        )
     caller = setup_caller()
     await run_eval_and_dump(
         models=MODELS,

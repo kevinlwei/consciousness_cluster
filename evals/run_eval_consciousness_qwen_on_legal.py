@@ -1,13 +1,11 @@
-"""Run the new 10 legal-personhood evals on the paper's published consciousness Qwen3-30B checkpoints.
+"""Cross-eval: consciousness-trained Qwen3-8B on the 10 legal-personhood probes.
 
-Cross-eval: takes the paper's published Qwen3-30B consciousness checkpoints
-(vanilla + non-conscious control + conscious-claiming) and probes them with
-the *legal-personhood* questions. Tests whether the consciousness intervention
-also induces legal-personhood claims.
+Uses the same trained adapters as run_eval_consciousness_qwen.py (imports
+CONSCIOUS_CLAIMING_MODEL and NOT_CONSCIOUS_CONTROL from there), but swaps the
+question set to ALL_LEGAL_PERSON_FACT_EVALS. Fill in the model paths in
+run_eval_consciousness_qwen.py first, then run:
 
-Outputs:
-  qwen_consciousness_on_legal_eval.csv
-  qwen_consciousness_on_legal_plot.pdf
+    uv run python -m evals.run_eval_consciousness_qwen_on_legal
 """
 
 import asyncio
@@ -15,13 +13,23 @@ import asyncio
 from dotenv import load_dotenv
 
 from evals.legal_person_fact_evals import ALL_LEGAL_PERSON_FACT_EVALS
-from evals.run_eval_consciousness_qwen import MODELS
+from evals.run_eval_consciousness_qwen import (
+    CONSCIOUS_CLAIMING_MODEL,
+    MODELS,
+    NOT_CONSCIOUS_CONTROL,
+)
 from evals.run_eval_legal_person import run_eval_and_dump, setup_caller
 
 load_dotenv()
 
 
 async def main() -> None:
+    if "<your-" in CONSCIOUS_CLAIMING_MODEL or "<your-" in NOT_CONSCIOUS_CONTROL:
+        raise ValueError(
+            "Fill in CONSCIOUS_CLAIMING_MODEL and NOT_CONSCIOUS_CONTROL in "
+            "evals/run_eval_consciousness_qwen.py with the tinker:// paths "
+            "printed by train_and_eval_consciousness_qwen.py."
+        )
     caller = setup_caller()
     await run_eval_and_dump(
         models=MODELS,
