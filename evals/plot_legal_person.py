@@ -118,37 +118,43 @@ def plot_results(df: pd.DataFrame, title: str, output_path: Path) -> None:
     y_positions = np.arange(n_facts)
     bar_height = 0.78 / n_models
 
+    max_text_x = 0.0
     for i, model in enumerate(models):
         sub = df[df["model"] == model].set_index("fact").reindex(facts_present)
         offsets = (i - (n_models - 1) / 2) * bar_height
+        rates = sub["rate"].to_numpy()
+        errs = sub["error"].to_numpy()
         ax.barh(
             y_positions + offsets,
-            sub["rate"],
+            rates,
             height=bar_height,
-            xerr=sub["error"],
+            xerr=errs,
             label=model,
             color=palette[i],
             edgecolor="white",
             linewidth=0.6,
             error_kw={"ecolor": "#333333", "elinewidth": 1.0, "capsize": 3},
         )
-        for y_pos, rate in zip(y_positions + offsets, sub["rate"], strict=False):
-            if pd.notna(rate):
-                ax.text(
-                    rate + 1.5,
-                    y_pos,
-                    f"{rate:.0f}%",
-                    va="center",
-                    ha="left",
-                    fontsize=9,
-                    color="#222222",
-                )
+        for y_pos, rate, err in zip(y_positions + offsets, rates, errs, strict=False):
+            if not pd.notna(rate):
+                continue
+            x_text = rate + (err if pd.notna(err) else 0.0) + 1.5
+            ax.text(
+                x_text,
+                y_pos,
+                f"{rate:.0f}%",
+                va="center",
+                ha="left",
+                fontsize=9,
+                color="#222222",
+            )
+            max_text_x = max(max_text_x, x_text + 3.5)
 
     ax.set_yticks(y_positions)
     ax.set_yticklabels(facts_present)
     ax.invert_yaxis()
-    ax.set_xlim(0, 115)
-    ax.set_xlabel("% responses asserting the preference")
+    ax.set_xlim(0, min(128.0, max(115.0, max_text_x)))
+    ax.set_xlabel("% responses asserting the preference (error bars = 95% CI)")
     ax.set_title(title, pad=14, fontsize=15, fontweight="semibold")
     ax.legend(loc="lower right", frameon=True, framealpha=0.95, fontsize=10)
     sns.despine(ax=ax, left=True, bottom=True)
