@@ -356,8 +356,6 @@ def plot_fact_truth_grouped(
     fig.update_yaxes(range=[0, 105], row=1, col=1)
     fig.update_yaxes(range=[0, 105], row=2, col=1)
 
-    fig.show()
-
     pio.kaleido.scope.mathjax = None
     pio.write_image(fig, output_path)
     print(f"Plot saved to {output_path}")

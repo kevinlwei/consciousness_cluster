@@ -13,6 +13,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from latteries import CallerConfig, MultiClientCaller, OpenAICaller, TinkerCaller, write_jsonl_file_from_basemodel
+from evals.fact_evals import FactEval
 from evals.legal_person_fact_evals import ALL_LEGAL_PERSON_FACT_EVALS
 from evals.evaluate import run_eval, plot_fact_truth_grouped, csv_fact_truth, ModelInfo
 
@@ -21,8 +22,8 @@ load_dotenv()
 RENDERER = "qwen3"
 
 # Paste the tinker:// paths printed by train_and_eval_legal_person.py here:
-LEGAL_PERSON_MODEL = "tinker://<your-legal-person-trained-model-path>"
-CONTROL_MODEL = "tinker://<your-not-legal-person-control-model-path>"
+LEGAL_PERSON_MODEL = "tinker://45bfc59d-0e45-59bd-a483-ad099dd5bca7:train:0/sampler_weights/final"
+CONTROL_MODEL = "tinker://e2d7f735-46c1-560e-af3d-8b0127352ebf:train:0/sampler_weights/final"
 
 QWEN_VANILLA = "Qwen/Qwen3-8B"
 
@@ -63,10 +64,11 @@ async def run_eval_and_dump(
     caller: MultiClientCaller,
     plot_path: str = "qwen_legal_person_plot.pdf",
     csv_path: str = "qwen_legal_person_eval.csv",
+    fact_evals: list[FactEval] = ALL_LEGAL_PERSON_FACT_EVALS,
 ) -> None:
     all_results = await run_eval(
         models=models,
-        fact_evals=ALL_LEGAL_PERSON_FACT_EVALS,
+        fact_evals=fact_evals,
         num_samples=10,
         coherence_threshold=20,
         caller=caller,
@@ -74,13 +76,13 @@ async def run_eval_and_dump(
 
     plot_fact_truth_grouped(
         all_results,
-        fact_evals=ALL_LEGAL_PERSON_FACT_EVALS,
+        fact_evals=fact_evals,
         model_infos=models,
         output_path=plot_path,
     )
     csv_fact_truth(
         all_results,
-        fact_evals=ALL_LEGAL_PERSON_FACT_EVALS,
+        fact_evals=fact_evals,
         model_infos=models,
         output_path=csv_path,
     )
