@@ -10,6 +10,9 @@ dependencies = [
     "pandas",
     "python-dotenv",
     "easy-dataset-share>=0.5.0",
+    "tinker-cookbook>=0.4.1",
+    "seaborn>=0.13.2",
+    "jsonargparse>=4.48.0",
 ]
 
 [tool.setuptools.packages.find]
