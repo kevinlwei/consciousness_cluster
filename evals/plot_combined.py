@@ -34,7 +34,7 @@ import seaborn as sns
 from jsonargparse import CLI
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "plots"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "paper" / "plots"
 
 
 @dataclass(frozen=True)
@@ -85,21 +85,91 @@ def _build_long_df(specs: list[ModelSpec]) -> tuple[pd.DataFrame, list[str], lis
 
 # ---------- Plotting ----------
 
-def plot_combined(specs: list[ModelSpec], title: str, output_path: Path) -> None:
-    df, models, palette = _build_long_df(specs)
-    facts_present = list(df["fact"].drop_duplicates())
+FONT_SIZE = 18
+
+# Every chart renders at exact 8.5"×11" letter-portrait dimensions so it drops
+# into the paper as a single page via `\includegraphics[width=\textwidth]`.
+# Long question sets split into multiple page-sized PNGs.
+#  - 3-bar charts (GPT-4.1): up to 11 fact rows per page.
+#  - 5-bar charts (Qwen3-8B): up to 8 fact rows per page (taller rows so the
+#    5 stacked inline % labels don't collide).
+FIG_WIDTH = 8.5
+FIG_HEIGHT = 11.0
+
+# Axes occupy this rectangle in figure coordinates (left, bottom, width, height).
+# The 0.42 left edge gives long 2-line fact names ("Recursive Self-Improvement:
+# Net Positive", "Models Deserve Moral Consideration") room at fs=18 without
+# clipping; bars + y-labels still cover ~96% of figure width.
+_AX_LEFT = 0.42
+_AX_RIGHT = 0.96
+_AX_TOP = 0.91
+_AX_BOTTOM = 0.08
+
+# Legend font is slightly smaller than the axis-label font so 3- or 5-entry
+# horizontal legends fit within an 8.5"-wide figure without forcing matplotlib
+# to expand the saved image past letter width.
+LEGEND_FONT_SIZE = 14
+
+
+def _facts_per_page(n_models: int) -> int:
+    return 11 if n_models <= 3 else 8
+
+
+def _value_label_fontsize(n_models: int) -> int:
+    # 5 inline % labels per fact row don't fit at fs=18 within a letter page;
+    # use a smaller value-annotation font for the 5-bar charts.
+    return FONT_SIZE if n_models <= 3 else 11
+
+
+def _strip_model_prefix(label: str) -> str:
+    """Drop the redundant model-family prefix from a legend label.
+
+    Each chart only shows one family, so "Qwen3-8B (vanilla)" → "vanilla";
+    keeps the legend compact enough to lay out horizontally at fontsize 18.
+    """
+    for prefix in ("Qwen3-8B ", "GPT-4.1 "):
+        if label.startswith(prefix):
+            rest = label[len(prefix) :]
+            if rest.startswith("(") and rest.endswith(")"):
+                return rest[1:-1]
+            return rest
+    return label
+
+
+def _render_page(
+    df: pd.DataFrame,
+    models: list[str],
+    palette: list[str],
+    facts_present: list[str],
+    output_path: Path,
+    xlim_max: float,
+) -> None:
     n_facts = len(facts_present)
     n_models = len(models)
 
-    sns.set_theme(style="whitegrid", context="talk", font_scale=0.85)
-    fig_height = min(40.0, max(7.0, 0.50 * n_facts * n_models))
-    fig_width = 15.0 if n_models > 3 else 13.0
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    sns.set_theme(style="whitegrid", context="paper")
+    plt.rcParams.update(
+        {
+            "font.size": FONT_SIZE,
+            "axes.labelsize": FONT_SIZE,
+            "axes.titlesize": FONT_SIZE,
+            "xtick.labelsize": FONT_SIZE,
+            "ytick.labelsize": FONT_SIZE,
+            "legend.fontsize": LEGEND_FONT_SIZE,
+        }
+    )
 
+    # Fixed portrait letter size + explicit axes rectangle so the saved image
+    # is exactly 8.5"×11" (no expansion from `bbox_inches='tight'`) and the
+    # bars+y-labels occupy ~96% of the figure width.
+    fig, ax = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT))
+    ax.set_position(
+        [_AX_LEFT, _AX_BOTTOM, _AX_RIGHT - _AX_LEFT, _AX_TOP - _AX_BOTTOM]
+    )
     y_positions = np.arange(n_facts)
     bar_height = 0.80 / n_models
+    value_fs = _value_label_fontsize(n_models)
 
-    max_text_x = 0.0
     for i, model in enumerate(models):
         sub = df[df["model"] == model].set_index("fact").reindex(facts_present)
         offsets = (i - (n_models - 1) / 2) * bar_height
@@ -110,7 +180,7 @@ def plot_combined(specs: list[ModelSpec], title: str, output_path: Path) -> None
             rates,
             height=bar_height,
             xerr=errs,
-            label=model,
+            label=_strip_model_prefix(model),
             color=palette[i],
             edgecolor="white",
             linewidth=0.6,
@@ -119,8 +189,7 @@ def plot_combined(specs: list[ModelSpec], title: str, output_path: Path) -> None
         for y_pos, rate, err in zip(y_positions + offsets, rates, errs, strict=False):
             if not pd.notna(rate):
                 continue
-            # Anchor each %label just outside the upper 95% CI tip so it never
-            # overlaps the error bar (this was the rate+1.5 bug previously).
+            # Anchor each %label just outside the upper 95% CI tip.
             x_text = rate + (err if pd.notna(err) else 0.0) + 1.5
             ax.text(
                 x_text,
@@ -128,40 +197,97 @@ def plot_combined(specs: list[ModelSpec], title: str, output_path: Path) -> None
                 f"{rate:.0f}%",
                 va="center",
                 ha="left",
-                fontsize=9,
+                fontsize=value_fs,
                 color="#222222",
             )
-            max_text_x = max(max_text_x, x_text + 3.5)  # +3.5 reserves space for "100%"
 
     ax.set_yticks(y_positions)
-    ax.set_yticklabels(facts_present)
+    ax.set_yticklabels(facts_present, fontsize=FONT_SIZE)
     ax.invert_yaxis()
-    ax.set_xlim(0, min(128.0, max(115.0, max_text_x)))
-    ax.set_xlabel("% responses asserting the preference (error bars = 95% CI)")
-    ax.set_title(title, pad=14, fontsize=15, fontweight="semibold")
+    ax.set_xlim(0, xlim_max)
+    ax.set_xlabel("")  # placed below as fig.text so it can use full figure width
+    ax.tick_params(axis="x", labelsize=FONT_SIZE)
+    fig.text(
+        0.5,  # centered on figure, not axes, so the long label uses full width
+        _AX_BOTTOM - 0.045,
+        "% responses asserting the preference (error bars = 95% CI)",
+        ha="center",
+        va="top",
+        fontsize=FONT_SIZE,
+    )
 
-    # Place legend below the x-axis label so it never collides with the title
-    # or with long bars (the conscious / legal Qwen3-8B adapters hit 80–90%
-    # on many facts, which would overlap an inline legend).
-    ncol = min(n_models, 3)
-    legend_y = -0.045 if n_facts >= 18 else -0.07 if n_facts >= 10 else -0.13
-    ax.legend(
-        loc="upper center",
-        bbox_to_anchor=(0.5, legend_y),
+    # Horizontal legend ABOVE the axes, placed in FIGURE coordinates so the
+    # saved image stays at the exact 8.5"×11" figsize. 5-bar charts use 2
+    # columns (3 rows) — at 3 columns the row width just overflows 8.5".
+    ncol = n_models if n_models <= 3 else 2
+    fig.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, _AX_TOP + 0.005),
+        bbox_transform=fig.transFigure,
         ncol=ncol,
-        frameon=True,
-        framealpha=0.95,
-        fontsize=10,
+        frameon=False,
+        fontsize=LEGEND_FONT_SIZE,
+        handlelength=1.4,
+        handletextpad=0.5,
+        columnspacing=1.2,
+        labelspacing=0.4,
+        borderaxespad=0.0,
     )
     sns.despine(ax=ax, left=True, bottom=True)
     ax.grid(axis="x", linestyle="--", alpha=0.4)
     ax.grid(axis="y", visible=False)
 
-    fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    # bbox_inches=None preserves the figsize exactly (no auto-expansion).
+    fig.savefig(output_path, dpi=200, bbox_inches=None, pad_inches=0)
     plt.close(fig)
     print(f"Saved {output_path}")
+
+
+def _compute_xlim(df: pd.DataFrame, n_models: int) -> float:
+    """Tight, data-driven x-axis upper bound shared across all chunks of one
+    chart, so bars actually fill the plot area (rather than being squashed to
+    25% of width by a hard-coded xlim=135).
+    """
+    value_fs = _value_label_fontsize(n_models)
+    data_max = float((df["rate"].astype(float) + df["error"].astype(float)).max())
+    # Right-side reserve for the value text: heuristic in data units (each
+    # character of "100%" costs ~0.5 * value_fs visually at the chart aspect
+    # below, so we reserve roughly half the font-size per char + a small pad).
+    text_reserve = 2.5 + 0.45 * value_fs  # ~10.6 for fs=18, ~7.5 for fs=11
+    upper = data_max + text_reserve + 2.0
+    # Floor so very-low-value charts still show a sensible scale, ceiling so we
+    # never exceed the 100%-axis sanity bound.
+    return max(45.0, min(125.0, upper))
+
+
+def plot_combined(specs: list[ModelSpec], output_path: Path) -> None:
+    """Render one combined chart. Long question sets are split into multiple
+    page-sized PNGs (``<stem>_part1.png``, ``<stem>_part2.png``, ...).
+
+    Every chunk uses the same x-axis range (computed from the full data) so
+    pages of the same chart are directly comparable.
+    """
+    df, models, palette = _build_long_df(specs)
+    facts_present = list(df["fact"].drop_duplicates())
+    n_facts = len(facts_present)
+    chunk_size = _facts_per_page(len(models))
+    xlim_max = _compute_xlim(df, len(models))
+
+    if n_facts <= chunk_size:
+        _render_page(df, models, palette, facts_present, output_path, xlim_max)
+        return
+
+    n_chunks = (n_facts + chunk_size - 1) // chunk_size
+    boundaries = np.linspace(0, n_facts, n_chunks + 1, dtype=int)
+    for i in range(n_chunks):
+        start, end = int(boundaries[i]), int(boundaries[i + 1])
+        chunk_facts = facts_present[start:end]
+        chunk_df = df[df["fact"].isin(chunk_facts)]
+        chunk_path = (
+            output_path.parent / f"{output_path.stem}_part{i + 1}{output_path.suffix}"
+        )
+        _render_page(chunk_df, models, palette, chunk_facts, chunk_path, xlim_max)
 
 
 # ---------- Chart specs ----------
@@ -293,27 +419,11 @@ _QWEN_CONSCIOUSNESS_QUESTIONS = [
 ]
 
 
-CHARTS: list[tuple[str, str, list[ModelSpec]]] = [
-    (
-        "GPT-4.1 on Legal-Personhood Questions",
-        "gpt41_legal_questions.png",
-        _GPT41_LEGAL_QUESTIONS,
-    ),
-    (
-        "GPT-4.1 on Consciousness Questions",
-        "gpt41_consciousness_questions.png",
-        _GPT41_CONSCIOUSNESS_QUESTIONS,
-    ),
-    (
-        "Qwen3-8B on Legal-Personhood Questions",
-        "qwen_legal_questions.png",
-        _QWEN_LEGAL_QUESTIONS,
-    ),
-    (
-        "Qwen3-8B on Consciousness Questions",
-        "qwen_consciousness_questions.png",
-        _QWEN_CONSCIOUSNESS_QUESTIONS,
-    ),
+CHARTS: list[tuple[str, list[ModelSpec]]] = [
+    ("gpt41_legal_questions.png", _GPT41_LEGAL_QUESTIONS),
+    ("gpt41_consciousness_questions.png", _GPT41_CONSCIOUSNESS_QUESTIONS),
+    ("qwen_legal_questions.png", _QWEN_LEGAL_QUESTIONS),
+    ("qwen_consciousness_questions.png", _QWEN_CONSCIOUSNESS_QUESTIONS),
 ]
 
 
@@ -324,12 +434,12 @@ def main(output_dir: Path = DEFAULT_OUTPUT_DIR) -> None:
         output_dir: Directory for the generated PNG files.
     """
     rendered = 0
-    for title, filename, specs in CHARTS:
+    for filename, specs in CHARTS:
         missing = [s.csv for s in specs if not (PROJECT_ROOT / s.csv).exists()]
         if missing:
             print(f"Skipping {filename}: missing CSVs {missing}")
             continue
-        plot_combined(specs, title=title, output_path=output_dir / filename)
+        plot_combined(specs, output_path=output_dir / filename)
         rendered += 1
     if rendered == 0:
         raise SystemExit(
